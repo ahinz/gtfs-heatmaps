@@ -26,9 +26,9 @@ object util {
 
   def timeStrToDouble(t: String) =
     t.split(":") match {
-      case Array(I(hr), I(min)) => hr.toDouble + min / 60.0
+      case Array(I(hr), I(min)) => hr * 60.0 * 60.0 + min * 60.0
       case Array(I(hr), I(min), I(sec)) =>
-        hr.toDouble + min / 60.0 + sec / (60.0 * 60.0)
+        hr * 60.0 * 60.0 + min * 60.0 + sec.toDouble
       case s => {
         println(s"Invalid time format $t (${s.toSeq})")
         sys.error(s"Invalid time format $t")

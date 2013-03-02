@@ -45,11 +45,23 @@ object Context {
   println("Parsing trips...")
   val trips = parseTripsFromFile("gtfs/stop_times.txt").right.get.values
 
+  println(s"Parsed ${trips.toSeq.length} trips!")
   println("Parsing stops...")
   val stops = parseStopFromFile("gtfs/stops.txt").right.get
 
   println("Creating line strings...")
-  val tripsInRange = trips.take(1000) // First 10 trips of the day
+  // Morning range:
+  // 8h to 10h
+  val startTime = 8.0 * 60.0 * 60.0
+  val endTime = 10.0 * 60.0 * 60.0
+
+  val tripsInRange = trips.filter { t =>
+    t.foldLeft(false)((b, x) =>
+      b || (x._1 >= startTime && x._1 <= endTime))
+  }
+
+  println(s"Found ${tripsInRange.toSeq.length} trips in time range")
+
   val lines:Seq[LineString[Int]] =
     tripsInRange.toSeq.map { tripStops =>
       LineString(
@@ -114,9 +126,20 @@ class TestResource {
 
     println(s"X->$x Y->$y")
 
-    val costs = focal.CostDistance(Context.transitTimeRaster, Seq((x,y)))
+    val costsOp = focal.CostDistance(Context.transitTimeRaster, Seq((x,y)))
 
-    val pngOp = io.SimpleRenderPng(costs)
+    val ramp:Seq[Int] = geotrellis.data.ColorRamps.HeatmapBlueToYellowToRedSpectrum.colors :+ 0x0
+    val breaks:Seq[Int] =
+      (1 to ramp.length).map(_*10*60) // 10 minute intervals
+
+    val costs = Context.server.run(costsOp)
+    val hist = Context.server.run(statistics.op.stat.GetHistogram(costs, 100000))
+
+    val pngOp = io.RenderPng(costs,
+      geotrellis.data.ColorBreaks(breaks.toArray, ramp.toArray),
+      hist,
+      0x0)
+
     val png = Context.server.run(pngOp)
 
     Response.ok(png).`type`("image/png").build()
