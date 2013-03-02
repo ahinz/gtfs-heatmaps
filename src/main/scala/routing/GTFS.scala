@@ -38,13 +38,19 @@ object gtfs {
       .map(s => shapeSeqToFt(s._2, s._1))
       .sorted
 
-
   def parseShapesFromString(s: String):Either[Seq[String], Seq[LineString[Int]]] =
     parseShapeDefs(s.split("\n").map(_.trim()))
       .right
       .map(s => parseShapesAsFeatures(s))
 
+  def trimFirstLine(s: String) =
+    s.substring(s.indexOf("\n")+1)
+
   def parseShapesFromFile(s: String):Either[Seq[String], Seq[LineString[Int]]] =
-    parseShapesFromString(io.Source.fromFile(s).mkString)
+    parseShapesFromString(
+      trimFirstLine(
+        io.Source
+          .fromFile(s)
+          .mkString))
 
 }
