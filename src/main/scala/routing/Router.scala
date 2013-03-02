@@ -94,16 +94,27 @@ class TestResource {
 
   @GET
   def transit(
-    @QueryParam("bbox")
-    bbox: String,
+    @QueryParam("lat")
+    latstr: String,
 
-    @QueryParam("width")
-    cols: String,
+    @QueryParam("lng")
+    lngstr: String) = {
 
-    @QueryParam("height")
-    rows: String) = {
+    val lato = D(latstr)
+    val lngo = D(lngstr)
 
-    val costs = focal.CostDistance(Context.transitTimeRaster, Seq((50,50)))
+    val ll =
+      for(lat <- lato;
+        lng <- lngo)
+      yield latLonToMeters(lat, lng)
+
+    val (x,y) = Context
+      .phillyRasterExtent
+      .mapToGrid(ll.getOrElse((-8367552.0, 4855775.0)))
+
+    println(s"X->$x Y->$y")
+
+    val costs = focal.CostDistance(Context.transitTimeRaster, Seq((x,y)))
 
     val pngOp = io.SimpleRenderPng(costs)
     val png = Context.server.run(pngOp)

@@ -18,6 +18,8 @@ object util {
           { println("--- failed to parse: '%s' ---".format(s))
             None }
       }
+
+    def apply(s: String):Option[T] = unapply(s)
   }
 
   val epsg4326factory = new GeometryFactory(new PrecisionModel(), 4326)
