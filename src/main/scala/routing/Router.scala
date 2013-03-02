@@ -49,7 +49,7 @@ object Context {
   val stops = parseStopFromFile("gtfs/stops.txt").right.get
 
   println("Creating line strings...")
-  val tripsInRange = trips.take(100) // First 10 trips of the day
+  val tripsInRange = trips.take(1000) // First 10 trips of the day
   val lines:Seq[LineString[Int]] =
     tripsInRange.toSeq.map { tripStops =>
       LineString(
@@ -71,6 +71,20 @@ object Context {
         busTimeForCell,
         lines))
 
+  println("Rendering transit template")
+
+  // Create a blank raster
+  val raster = CreateRaster(phillyRasterExtent)
+
+  // Assign a 'friction value' of walking to all of the cells
+  val rasterWalks = local.DoCell(raster, _ => walkingTimeForCell)
+
+  // Rasterize the bus lines. Use the bus speed for the friction
+  // value (this should be much lower than walking)
+  val rasterBothOp = AMin(rasterWalks, busTimeRaster)
+
+  lazy val transitTimeRaster = server.run(rasterBothOp)
+
   println("Server ready to go")
 
 }
@@ -89,17 +103,7 @@ class TestResource {
     @QueryParam("height")
     rows: String) = {
 
-    // Create a blank raster
-    val raster = CreateRaster(Context.phillyRasterExtent)
-
-    // Assign a 'friction value' of walking to all of the cells
-    val rasterWalks = local.DoCell(raster, _ => Context.walkingTimeForCell)
-
-    // Rasterize the bus lines. Use the bus speed for the friction
-    // value (this should be much lower than walking)
-    val rasterBoth = AMin(rasterWalks, Context.busTimeRaster)
-
-    val costs = focal.CostDistance(rasterBoth, Seq((50,50)))
+    val costs = focal.CostDistance(Context.transitTimeRaster, Seq((50,50)))
 
     val pngOp = io.SimpleRenderPng(costs)
     val png = Context.server.run(pngOp)

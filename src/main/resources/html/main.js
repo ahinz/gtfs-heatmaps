@@ -16,13 +16,10 @@ window.onload = function() {
 
         var spread = document.getElementById('spread').value;
 
-        d = new L.TileLayer.WMS(pfx + "/density", {
-            layers: 'default',
-            style: spread,
-            format: 'image/png',
-            transparent: true,
-            attribution: 'Azavea',
-        })
+        var imageUrl = '/test?bbox=0&width=0&height=0';
+        var imageBounds = [[39.856, -75.312], [40.130, -74.936]];
+
+        d = L.imageOverlay(imageUrl, imageBounds, { opacity: 0.5 });
 
         d.addTo(map);
     }
