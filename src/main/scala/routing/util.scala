@@ -1,6 +1,8 @@
 package router
 
 import geotrellis.feature.LineString
+import geotrellis.feature.rasterize._
+import geotrellis._
 
 import com.vividsolutions.jts.geom.{GeometryFactory, PrecisionModel}
 
@@ -12,13 +14,28 @@ object util {
 
   class SafeStringOp[T](f: String => T) {
     def unapply(s: String):Option[T] =
-      try { Some(f(s)) } catch { case _:Exception => None }
+      try { Some(f(s.trim())) } catch { case _:Exception =>
+          { println("--- failed to parse: '%s' ---".format(s))
+            None }
+      }
   }
 
   val epsg4326factory = new GeometryFactory(new PrecisionModel(), 4326)
 
+  def timeStrToDouble(t: String) =
+    t.split(":") match {
+      case Array(I(hr), I(min)) => hr.toDouble + min / 60.0
+      case Array(I(hr), I(min), I(sec)) =>
+        hr.toDouble + min / 60.0 + sec / (60.0 * 60.0)
+      case s => {
+        println(s"Invalid time format $t (${s.toSeq})")
+        sys.error(s"Invalid time format $t")
+      }
+    }
+
   object D extends SafeStringOp(_.toDouble)
   object I extends SafeStringOp(_.toInt)
+  object T extends SafeStringOp(timeStrToDouble)
 
   def right[A,B](b: B):Either[A,B] = Right[A,B](b)
   def left[A,B](a: A):Either[A,B] = Left[A,B](a)
@@ -44,5 +61,49 @@ object util {
         left(s.filter(_.isLeft).map(_.left.get))
     }
 
+  val originShift = 2 * math.Pi * 6378137 / 2.0
+
+  def latLonToMeters(lat:Double, lon:Double) = {
+    val mx = lon * originShift / 180.0
+    val my1:Double = ( math.log( math.tan((90 + lat) * math.Pi / 360.0 )) / (math.Pi / 180.0) )
+    val my = my1 * originShift / 180
+
+    (mx, my)
+  }
+
+  case class AMin(r1: Op[Raster], r2: Op[Raster]) extends
+      Op2[Raster,Raster,Raster](r1, r2)({ (r1, r2) =>
+        Result(
+          r1.combine(r2) { (z1,z2) =>
+            if (z1 == NODATA) z2
+            else if (z2 == NODATA) z1
+            else math.min(z1,z2)
+          })
+      })
+
+  case class RasterizeLines[D](r: Op[RasterExtent], v: Op[Int], l: Op[Seq[LineString[D]]])
+      extends Op3[RasterExtent, Int, Seq[LineString[D]], Raster](r,v,l)({ (r, v, l) =>
+        val data = IntArrayRasterData.empty(r.cols, r.rows)
+
+        val cb = new Callback[LineString, D] {
+          def apply(c: Int, r: Int, g: LineString[D]) {
+            //println("%s, %s -> %s" format (c,r,v))
+            data.set(c, r, v)
+          }
+        }
+
+        for(ft <- l) {
+          try {
+            AR.foreachCellByLineString(ft, r)(cb)
+          } catch {
+            case e:Exception => {
+              println(s"Failed to rasterize a line ($ft)")
+              e.printStackTrace
+            }
+          }
+        }
+
+        Result(new Raster(data, r))
+      })
 
 }

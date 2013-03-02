@@ -38,19 +38,60 @@ object gtfs {
       .map(s => shapeSeqToFt(s._2, s._1))
       .sorted
 
-  def parseShapesFromString(s: String):Either[Seq[String], Seq[LineString[Int]]] =
-    parseShapeDefs(s.split("\n").map(_.trim()))
+  def parseShapesFromStrings(s: Seq[String]):Either[Seq[String], Seq[LineString[Int]]] =
+    parseShapeDefs(s.map(_.trim))
       .right
       .map(s => parseShapesAsFeatures(s))
+
+  def parseShapesFromString(s: String):Either[Seq[String], Seq[LineString[Int]]] =
+    parseShapesFromStrings(s.split("\n"))
 
   def trimFirstLine(s: String) =
     s.substring(s.indexOf("\n")+1)
 
+  /*
+   * trip_id,arrival_time,departure_time,stop_id,stop_sequence
+   * 3509653,05:14:00,05:14:00,29782,32
+   */
+  /*
+   * stop_id,stop_name,stop_lat,stop_lon,location_type,parent_station,zone_id,wheelchair_boarding                                                                              * 2,Ridge Av & Lincoln Dr  ,40.014986,-75.206826,,31032,1,0
+   */
+
+  def parseStops(s: Seq[String]):Either[Seq[String], Map[Int, (Double, Double)]] =
+    sequence(
+      s.map(_.split(",")).map(_ match {
+        case Array(I(stop_id), _, D(lat), D(lng), _, _, _, _) =>
+          right(stop_id -> (lng, lat))
+        case v => left(s"Could not parse $v")
+      })).right.map(Map(_:_*))
+
+  // Time of day in decimal (10:15 -> 10.25, 13:30 -> 13.5)
+  def parseTrips(s: Seq[String]):Either[Seq[String], Map[Int, Seq[(Double, Int)]]] =
+    sequence(
+      s.map(_.split(",")).map(_ match {
+        case Array(I(tid), T(time), _, I(stop_id), I(stop_seq)) =>
+          right((tid, time, stop_id, stop_seq))
+        case v => left(sys.error(s"Couldn't parse ${v.toSeq}"))
+      })).right
+      .map(_.groupBy(_._1)
+        .mapValues(_.sortWith(_._4 < _._4)
+          .map(t => (t._2, t._3))))
+
+
+  def fileParser[L,R](f: Seq[String] => Either[L, R]) =
+    (s:String) => f(trimFirstLine(
+      io.Source
+        .fromFile(s)
+        .mkString)
+      .split("\n"))
+
+  def parseStopFromFile(s: String):Either[Seq[String], Map[Int, (Double, Double)]] =
+    fileParser(parseStops)(s)
+
   def parseShapesFromFile(s: String):Either[Seq[String], Seq[LineString[Int]]] =
-    parseShapesFromString(
-      trimFirstLine(
-        io.Source
-          .fromFile(s)
-          .mkString))
+    fileParser(parseShapesFromStrings)(s)
+
+  def parseTripsFromFile(s: String) =
+    fileParser(parseTrips)(s)
 
 }
