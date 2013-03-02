@@ -1,5 +1,7 @@
 package router
 
+import com.vividsolutions.jts.geom.{Coordinate}
+
 import geotrellis.feature.rasterize._
 import geotrellis.feature._
 import geotrellis._
@@ -7,10 +9,13 @@ import geotrellis._
 object AR {
   def foreachCellByLineString[D](p:LineString[D], re:RasterExtent)(f: Callback[LineString,D]) {
     val geom = p.geom
-    val coords = geom.getCoordinates()
-    val pairs = coords.zip(coords.tail)
+    val coords:Array[Coordinate] = geom.getCoordinates()
 
-    for((p0, p1) <- pairs) {
+    var i = 0
+    val l = coords.length - 1
+    while(i < l) {
+      val p0 = coords(i)
+      val p1 = coords(i+1)
 
       val p0x = re.mapXToGrid(p0.x)
       val p0y = re.mapYToGrid(p0.y)
@@ -24,6 +29,8 @@ object AR {
       } else {
         foreachCellInGridLine(p1x, p1y, p0x, p0y, p, re)(f)
       }
+
+      i += 1
     }
   }
 
