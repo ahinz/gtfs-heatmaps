@@ -26,7 +26,7 @@ object gtfs {
 
   def shapeSeqToFt(s: Seq[Shape], d: Int):LineString[Int] =
     LineString(
-      epsg4326factory.createLineString(
+      epsg3857factory.createLineString(
         s.map(shape => new Coordinate(shape.lng, shape.lat)).toArray),
       d)
 

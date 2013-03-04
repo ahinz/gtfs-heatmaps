@@ -39,6 +39,12 @@ object Context {
   val catalog = process.Catalog("", Map.empty, "", "")
   val server = process.Server("demo", catalog)
 
+  // Create a blank raster
+  val raster = CreateRaster(phillyRasterExtent)
+
+  // Assign a 'friction value' of walking to all of the cells
+  val rasterWalks = local.DoCell(raster, _ => walkingTimeForCell)
+
   val cachePath = "/tmp/cached_transit_raster.arg"
   val f = new java.io.File(cachePath)
   lazy val transitTimeRaster =
@@ -90,7 +96,7 @@ object Context {
         val cellTime = (cellWidth / speed).toInt  // seconds
 
         LineString(
-          epsg4326factory.createLineString(
+          epsg3857factory.createLineString(
             coords.toArray),
           cellTime)
       }
@@ -98,20 +104,27 @@ object Context {
       val lines:Seq[LineString[Int]] =
         tripsInRange.toSeq.map(tripStops => stopsToLineString(tripStops))
 
+      val cb = new Updater {
+        def apply(c: Int, r: Int, g: LineString[Int], data: IntArrayRasterData) {
+          val prev = data.get(c,r)
+          data.set(c, r,
+            if (prev == NODATA) {
+              g.data
+            } else {
+              math.min(g.data, prev)
+            })
+        }
+      }
+
       println("Rasterizing %s lines..." format lines.length)
       val busTimeRaster =
         server.run(
           RasterizeLines(
             phillyRasterExtent,
+            cb,
             lines))
 
       println("Rendering transit template")
-
-      // Create a blank raster
-      val raster = CreateRaster(phillyRasterExtent)
-
-      // Assign a 'friction value' of walking to all of the cells
-      val rasterWalks = local.DoCell(raster, _ => walkingTimeForCell)
 
       // Rasterize the bus lines. Use the bus speed for the friction
       // value (this should be much lower than walking)
@@ -154,6 +167,7 @@ class TestResource {
     println(s"X->$x Y->$y")
 
     val costsOp = focal.CostDistance(Context.transitTimeRaster, Seq((x,y)))
+    //val costsOp = focal.CostDistance(Context.rasterWalks, Seq((x,y)))
 
     val ramp:Seq[Int] = geotrellis.data.ColorRamps.HeatmapBlueToYellowToRedSpectrum.colors :+ 0x0
     val breaks:Seq[Int] =

@@ -22,7 +22,7 @@ object util {
     def apply(s: String):Option[T] = unapply(s)
   }
 
-  val epsg4326factory = new GeometryFactory(new PrecisionModel(), 4326)
+  val epsg3857factory = new GeometryFactory(new PrecisionModel(), 3857)
 
   def timeStrToDouble(t: String) =
     t.split(":") match {
@@ -83,28 +83,35 @@ object util {
           })
       })
 
-  case class RasterizeLines(r: Op[RasterExtent], l: Op[Seq[LineString[Int]]])
-      extends Op2[RasterExtent, Seq[LineString[Int]], Raster](r,l)({ (r,l) =>
-        val data = IntArrayRasterData.empty(r.cols, r.rows)
+  type RE = RasterExtent
+  type S = Seq[LineString[Int]]
 
-        val cb = new Callback[LineString, Int] {
-          def apply(c: Int, r: Int, g: LineString[Int]) {
-            data.set(c, r, g.data)
-          }
+  trait Updater {
+    def apply(c: Int, r: Int, g: LineString[Int], d: IntArrayRasterData)
+  }
+
+  case class RasterizeLines(r: Op[RE], up: Op[Updater], l: Op[S])
+      extends Op3[RE, Updater, S, Raster](r,up,l)({ (r,up,l) =>
+    val data = IntArrayRasterData.empty(r.cols, r.rows)
+
+    val cb = new Callback[LineString, Int] {
+      def apply(c: Int, r: Int, g: LineString[Int]) {
+        up(c,r,g,data)
+      }
+    }
+
+    for(ft <- l) {
+      try {
+        AR.foreachCellByLineString(ft, r)(cb)
+      } catch {
+        case e:Exception => {
+          println(s"Failed to rasterize a line ($ft)")
+          e.printStackTrace
         }
+      }
+    }
 
-        for(ft <- l) {
-          try {
-            AR.foreachCellByLineString(ft, r)(cb)
-          } catch {
-            case e:Exception => {
-              println(s"Failed to rasterize a line ($ft)")
-              e.printStackTrace
-            }
-          }
-        }
-
-        Result(new Raster(data, r))
+    Result(new Raster(data, r))
       })
 
 }
