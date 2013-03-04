@@ -15,7 +15,7 @@ import geotrellis.data.arg.{ArgWriter, ArgReader}
 import com.vividsolutions.jts.geom.{Coordinate}
 
 object Context {
-  val walkingSpeedMph = 3.5
+  val walkingSpeedMph = 3.0
   val walkingSpeedMetersPerSec = walkingSpeedMph * 0.44704
 
   val phillyExtent = Extent(-8383693, 4845038, -8341837, 4884851)
@@ -32,6 +32,8 @@ object Context {
 
   // Truncate to integers in seconds
   val walkingTimeForCell = (cellWidth / walkingSpeedMetersPerSec).toInt
+
+  println(s"Walking time per cell: $walkingTimeForCell")
 
   val phillyRasterExtent =
     RasterExtent(phillyExtent, cellWidth, cellHeight, cols, rows)
@@ -63,12 +65,12 @@ object Context {
       println("Creating line strings...")
       // Morning range:
       // 6h to 10h
-      val startTime = 6.0 * 60.0 * 60.0
+      val startTime = 5.0 * 60.0 * 60.0
       val endTime = 10.0 * 60.0 * 60.0
 
       val tripsInRange = trips.filter { t =>
         t.foldLeft(false)((b, x) =>
-          b || (x._1 >= startTime && x._1 <= endTime))
+           b || (x._1 >= startTime && x._1 <= endTime))
       }
 
       def stopsToCoords(trip: Seq[(Double, Int)]) =
