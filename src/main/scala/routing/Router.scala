@@ -10,15 +10,13 @@ import geotrellis.raster.op._
 import geotrellis.rest.op._
 import geotrellis.feature.LineString
 import geotrellis._
+import geotrellis.data.arg.{ArgWriter, ArgReader}
 
 import com.vividsolutions.jts.geom.{Coordinate}
 
 object Context {
   val walkingSpeedMph = 3.5
-  val busSpeedMph = 11.0
-
   val walkingSpeedMetersPerSec = walkingSpeedMph * 0.44704
-  val busSpeedMetersPerSec = busSpeedMph * 0.44704
 
   val phillyExtent = Extent(-8383693, 4845038, -8341837, 4884851)
   val cellWidthTgt = 30.0 // meters
@@ -34,7 +32,6 @@ object Context {
 
   // Truncate to integers in seconds
   val walkingTimeForCell = (cellWidth / walkingSpeedMetersPerSec).toInt
-  val busTimeForCell = (cellWidth / busSpeedMetersPerSec).toInt
 
   val phillyRasterExtent =
     RasterExtent(phillyExtent, cellWidth, cellHeight, cols, rows)
@@ -42,60 +39,90 @@ object Context {
   val catalog = process.Catalog("", Map.empty, "", "")
   val server = process.Server("demo", catalog)
 
-  println("Parsing trips...")
-  val trips = parseTripsFromFile("gtfs/stop_times.txt").right.get.values
+  val cachePath = "/tmp/cached_transit_raster.arg"
+  val f = new java.io.File(cachePath)
+  lazy val transitTimeRaster =
+    if (f.exists) {
+      println("Found cached raster (%s)..." format cachePath)
 
-  println(s"Parsed ${trips.toSeq.length} trips!")
-  println("Parsing stops...")
-  val stops = parseStopFromFile("gtfs/stops.txt").right.get
+      ArgReader.readPath(cachePath, None, None)
+    } else {
+      println("Parsing trips...")
+      val trips = parseTripsFromFile("gtfs/stop_times.txt").right.get.values
 
-  println("Creating line strings...")
-  // Morning range:
-  // 8h to 10h
-  val startTime = 8.0 * 60.0 * 60.0
-  val endTime = 10.0 * 60.0 * 60.0
+      println(s"Parsed ${trips.toSeq.length} trips!")
+      println("Parsing stops...")
+      val stops = parseStopFromFile("gtfs/stops.txt").right.get
 
-  val tripsInRange = trips.filter { t =>
-    t.foldLeft(false)((b, x) =>
-      b || (x._1 >= startTime && x._1 <= endTime))
-  }
+      println("Creating line strings...")
+      // Morning range:
+      // 6h to 10h
+      val startTime = 6.0 * 60.0 * 60.0
+      val endTime = 10.0 * 60.0 * 60.0
 
-  println(s"Found ${tripsInRange.toSeq.length} trips in time range")
+      val tripsInRange = trips.filter { t =>
+        t.foldLeft(false)((b, x) =>
+          b || (x._1 >= startTime && x._1 <= endTime))
+      }
 
-  val lines:Seq[LineString[Int]] =
-    tripsInRange.toSeq.map { tripStops =>
-      LineString(
-        epsg4326factory.createLineString(
-          tripStops.map(s => stops.get(s._2) match {
-            case Some((lng,lat)) => {
-              val m = latLonToMeters(lat, lng)
-              new Coordinate(m._1,m._2)
-            }
-            case None => sys.error(s"bad stop $s")
-          }).toArray), 1)
+      def stopsToCoords(trip: Seq[(Double, Int)]) =
+        trip.map(s => stops.get(s._2) match {
+          case Some((lng,lat)) => {
+            val m = latLonToMeters(lat, lng)
+            new Coordinate(m._1,m._2)
+          }
+          case None => sys.error(s"bad stop $s")
+        })
+
+      def stopsToTimeInterval(trip: Seq[(Double, Int)]) =  {
+        val t = trip.map(_._1)
+        t.max - t.min
+      }
+
+      def dist(s: Seq[Coordinate]) =
+        s.zip(s.tail).map(a => a._1.distance(a._2)).reduceLeft(_+_)
+
+      def stopsToLineString(trip: Seq[(Double, Int)]) = {
+        val coords = stopsToCoords(trip)
+        val distance = dist(coords)
+        val time = stopsToTimeInterval(trip)
+        val speed = distance / time               // meters per second
+        val cellTime = (cellWidth / speed).toInt  // seconds
+
+        LineString(
+          epsg4326factory.createLineString(
+            coords.toArray),
+          cellTime)
+      }
+
+      val lines:Seq[LineString[Int]] =
+        tripsInRange.toSeq.map(tripStops => stopsToLineString(tripStops))
+
+      println("Rasterizing %s lines..." format lines.length)
+      val busTimeRaster =
+        server.run(
+          RasterizeLines(
+            phillyRasterExtent,
+            lines))
+
+      println("Rendering transit template")
+
+      // Create a blank raster
+      val raster = CreateRaster(phillyRasterExtent)
+
+      // Assign a 'friction value' of walking to all of the cells
+      val rasterWalks = local.DoCell(raster, _ => walkingTimeForCell)
+
+      // Rasterize the bus lines. Use the bus speed for the friction
+      // value (this should be much lower than walking)
+      val rasterBothOp = AMin(rasterWalks, busTimeRaster)
+
+      val renderedRaster = server.run(rasterBothOp)
+
+      println("Writing raster to disk (%s)..." format cachePath)
+      ArgWriter(TypeInt).write(cachePath, renderedRaster, "transit")
+      renderedRaster
     }
-
-  println("Rasterizing %s lines..." format lines.length)
-  val busTimeRaster =
-    server.run(
-      RasterizeLines(
-        phillyRasterExtent,
-        busTimeForCell,
-        lines))
-
-  println("Rendering transit template")
-
-  // Create a blank raster
-  val raster = CreateRaster(phillyRasterExtent)
-
-  // Assign a 'friction value' of walking to all of the cells
-  val rasterWalks = local.DoCell(raster, _ => walkingTimeForCell)
-
-  // Rasterize the bus lines. Use the bus speed for the friction
-  // value (this should be much lower than walking)
-  val rasterBothOp = AMin(rasterWalks, busTimeRaster)
-
-  lazy val transitTimeRaster = server.run(rasterBothOp)
 
   println("Server ready to go")
 
@@ -130,7 +157,7 @@ class TestResource {
 
     val ramp:Seq[Int] = geotrellis.data.ColorRamps.HeatmapBlueToYellowToRedSpectrum.colors :+ 0x0
     val breaks:Seq[Int] =
-      (1 to ramp.length).map(_*10*60) // 10 minute intervals
+      (1 to ramp.length).map(_*5*60) // 10 minute intervals
 
     val costs = Context.server.run(costsOp)
     val hist = Context.server.run(statistics.op.stat.GetHistogram(costs, 100000))

@@ -83,14 +83,13 @@ object util {
           })
       })
 
-  case class RasterizeLines[D](r: Op[RasterExtent], v: Op[Int], l: Op[Seq[LineString[D]]])
-      extends Op3[RasterExtent, Int, Seq[LineString[D]], Raster](r,v,l)({ (r, v, l) =>
+  case class RasterizeLines(r: Op[RasterExtent], l: Op[Seq[LineString[Int]]])
+      extends Op2[RasterExtent, Seq[LineString[Int]], Raster](r,l)({ (r,l) =>
         val data = IntArrayRasterData.empty(r.cols, r.rows)
 
-        val cb = new Callback[LineString, D] {
-          def apply(c: Int, r: Int, g: LineString[D]) {
-            //println("%s, %s -> %s" format (c,r,v))
-            data.set(c, r, v)
+        val cb = new Callback[LineString, Int] {
+          def apply(c: Int, r: Int, g: LineString[Int]) {
+            data.set(c, r, g.data)
           }
         }
 
